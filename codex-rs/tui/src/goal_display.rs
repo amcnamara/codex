@@ -5,6 +5,11 @@ use codex_app_server_protocol::ThreadGoalStatus;
 pub(crate) const GOAL_USAGE: &str = "Usage: /goal [<objective>|clear|edit|pause|resume]";
 
 pub(crate) fn format_goal_elapsed_seconds(seconds: i64) -> String {
+    // Month and year buckets are approximate because this formats elapsed duration.
+    const DAYS_PER_WEEK: u64 = 7;
+    const APPROX_DAYS_PER_MONTH: u64 = 30;
+    const APPROX_DAYS_PER_YEAR: u64 = 365;
+
     let seconds = seconds.max(0) as u64;
     if seconds < 60 {
         return format!("{seconds}s");
@@ -17,10 +22,40 @@ pub(crate) fn format_goal_elapsed_seconds(seconds: i64) -> String {
 
     let hours = minutes / 60;
     let remaining_minutes = minutes % 60;
-    if hours >= 24 {
-        let days = hours / 24;
-        let remaining_hours = hours % 24;
-        return format!("{days}d {remaining_hours}h {remaining_minutes}m");
+    let total_days = hours / 24;
+    let remaining_hours = hours % 24;
+
+    if total_days >= APPROX_DAYS_PER_YEAR {
+        let mut remaining_days = total_days;
+        let years = remaining_days / APPROX_DAYS_PER_YEAR;
+        remaining_days %= APPROX_DAYS_PER_YEAR;
+        let months = remaining_days / APPROX_DAYS_PER_MONTH;
+        remaining_days %= APPROX_DAYS_PER_MONTH;
+        let weeks = remaining_days / DAYS_PER_WEEK;
+        remaining_days %= DAYS_PER_WEEK;
+        return format!(
+            "{years}y {months}mo {weeks}w {remaining_days}d {remaining_hours}h {remaining_minutes}m"
+        );
+    }
+
+    if total_days >= APPROX_DAYS_PER_MONTH {
+        let months = total_days / APPROX_DAYS_PER_MONTH;
+        let remaining_days = total_days % APPROX_DAYS_PER_MONTH;
+        let weeks = remaining_days / DAYS_PER_WEEK;
+        let remaining_days = remaining_days % DAYS_PER_WEEK;
+        return format!(
+            "{months}mo {weeks}w {remaining_days}d {remaining_hours}h {remaining_minutes}m"
+        );
+    }
+
+    if total_days >= DAYS_PER_WEEK {
+        let weeks = total_days / DAYS_PER_WEEK;
+        let remaining_days = total_days % DAYS_PER_WEEK;
+        return format!("{weeks}w {remaining_days}d {remaining_hours}h {remaining_minutes}m");
+    }
+
+    if total_days > 0 {
+        return format!("{total_days}d {remaining_hours}h {remaining_minutes}m");
     }
 
     if remaining_minutes == 0 {
@@ -82,6 +117,21 @@ mod tests {
 
         let almost_three_days = 2 * 24 * 60 * 60 + 23 * 60 * 60 + 42 * 60;
         assert_eq!(format_goal_elapsed_seconds(almost_three_days), "2d 23h 42m");
+
+        let day = 24 * 60 * 60;
+        for (seconds, expected) in [
+            (7 * day - 1, "6d 23h 59m"),
+            (7 * day, "1w 0d 0h 0m"),
+            (7 * day + 2 * 60 * 60 + 5 * 60, "1w 0d 2h 5m"),
+            (30 * day - 1, "4w 1d 23h 59m"),
+            (30 * day, "1mo 0w 0d 0h 0m"),
+            (38 * day, "1mo 1w 1d 0h 0m"),
+            (32 * day + 23 * 60 * 60 + 42 * 60, "1mo 0w 2d 23h 42m"),
+            (365 * day, "1y 0mo 0w 0d 0h 0m"),
+            (400 * day, "1y 1mo 0w 5d 0h 0m"),
+        ] {
+            assert_eq!(format_goal_elapsed_seconds(seconds), expected, "{seconds}s");
+        }
     }
 
     fn test_thread_goal(token_budget: Option<i64>, tokens_used: i64) -> ThreadGoal {
